@@ -5,3 +5,6 @@ google-auth-httplib2
 google-auth-oauthlib
 pdfplumber
 docx2txt
+python-dotenv
+qdrant-client[fastembed]
+langchain-text-splitters

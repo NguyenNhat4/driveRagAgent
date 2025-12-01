@@ -41,6 +41,14 @@ limitations under the License.
         font-weight: bold;
         font-size: 1.1em;
     }
+    .error {
+      color: red;
+      padding: 10px;
+      border: 1px solid red;
+      background-color: #ffeeee;
+      border-radius: 5px;
+      margin-top: 10px;
+    }
   </style>
 </head>
 <body>
@@ -49,6 +57,8 @@ limitations under the License.
 <!--Add buttons to initiate auth sequence and sign out.-->
 <button id="authorize_button" onclick="handleAuthClick()" class="hidden">Authorize & Open Picker</button>
 <button id="signout_button" onclick="handleSignoutClick()" class="hidden">Sign Out</button>
+
+<div id="error-box" class="error hidden"></div>
 
 <div id="result-box" class="hidden">
   <p><strong>Selected Folder ID:</strong></p>
@@ -81,6 +91,12 @@ limitations under the License.
   let accessToken = null;
   let pickerInited = false;
   let gisInited = false;
+
+  function showError(msg) {
+      const el = document.getElementById('error-box');
+      el.innerText = "Error: " + msg;
+      el.classList.remove('hidden');
+  }
 
   /**
    * Callback after api.js is loaded.
@@ -125,8 +141,12 @@ limitations under the License.
    *  Sign in the user upon button click.
    */
   function handleAuthClick() {
+    document.getElementById('error-box').classList.add('hidden'); // Clear previous errors
+
     tokenClient.callback = async (response) => {
       if (response.error !== undefined) {
+        console.error("Auth Error:", response);
+        showError(JSON.stringify(response));
         throw (response);
       }
       accessToken = response.access_token;
@@ -168,15 +188,23 @@ limitations under the License.
         .setIncludeFolders(true)
         .setMimeTypes('application/vnd.google-apps.folder');
     
-    const picker = new google.picker.PickerBuilder()
+    let builder = new google.picker.PickerBuilder()
         .enableFeature(google.picker.Feature.NAV_HIDDEN)
-        //.enableFeature(google.picker.Feature.MULTISELECT_ENABLED) // Single folder selection is safer for now
         .setDeveloperKey(API_KEY)
-        .setAppId(APP_ID)
         .setOAuthToken(accessToken)
         .addView(view)
-        .setCallback(pickerCallback)
-        .build();
+        .setCallback(pickerCallback);
+
+    // Only set AppId if it looks valid (e.g., numeric string)
+    // or if provided. The API sometimes rejects invalid App IDs.
+    // Since we fallback to project_id in python, which might be a string like 'my-project',
+    // we should be careful.
+    // However, if APP_ID is set, we try to use it.
+    if (APP_ID && APP_ID.length > 0) {
+        builder.setAppId(APP_ID);
+    }
+
+    const picker = builder.build();
     picker.setVisible(true);
   }
 
