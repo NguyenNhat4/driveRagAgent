@@ -19,15 +19,48 @@ limitations under the License.
 <head>
   <title>Google Picker API Quickstart</title>
   <meta charset="utf-8" />
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .hidden { display: none; }
+    #result-box {
+      margin-top: 20px;
+      padding: 15px;
+      border: 1px solid #ccc;
+      background-color: #f9f9f9;
+      border-radius: 5px;
+    }
+    .copy-btn {
+      margin-left: 10px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    code {
+        background: #eee;
+        padding: 4px;
+        border-radius: 4px;
+        font-weight: bold;
+        font-size: 1.1em;
+    }
+  </style>
 </head>
 <body>
-<p>Google Picker API Quickstart</p>
+<h3>Select a Folder from Google Drive</h3>
 
 <!--Add buttons to initiate auth sequence and sign out.-->
-<button id="authorize_button" onclick="handleAuthClick()">Authorize</button>
-<button id="signout_button" onclick="handleSignoutClick()">Sign Out</button>
+<button id="authorize_button" onclick="handleAuthClick()" class="hidden">Authorize & Open Picker</button>
+<button id="signout_button" onclick="handleSignoutClick()" class="hidden">Sign Out</button>
 
-<pre id="content" style="white-space: pre-wrap;"></pre>
+<div id="result-box" class="hidden">
+  <p><strong>Selected Folder ID:</strong></p>
+  <p>
+      <code id="folder-id"></code>
+      <button class="copy-btn" onclick="copyToClipboard()">Copy ID</button>
+  </p>
+  <p><small>Paste this ID into the "Folder ID" field in the main app.</small></p>
+  <p><strong>Folder Name:</strong> <span id="folder-name"></span></p>
+</div>
+
+<pre id="content" style="white-space: pre-wrap; display:none;"></pre>
 
 <script type="text/javascript">
   /* exported gapiLoaded */
@@ -39,20 +72,15 @@ limitations under the License.
   // included, separated by spaces.
   const SCOPES = 'https://www.googleapis.com/auth/drive.metadata.readonly';
 
-  // TODO(developer): Replace with your client ID and API key from https://console.cloud.google.com/.
-  const CLIENT_ID = '871460534047-fgpoa1ii4tegd33vaio2vugc79boin82.apps.googleusercontent.com';
-  const API_KEY = 'AIzaSyAgSKls_iCqhfZQZxABRz4EQ3MGsz55bmk';
-
-  // TODO(developer): Replace with your project number from https://console.cloud.google.com/.
-  const APP_ID = '871460534047';
+  // These values are injected by the Python backend
+  const CLIENT_ID = '{client_id}';
+  const API_KEY = '{api_key}';
+  const APP_ID = '{app_id}';
 
   let tokenClient;
   let accessToken = null;
   let pickerInited = false;
   let gisInited = false;
-
-  document.getElementById('authorize_button').style.visibility = 'hidden';
-  document.getElementById('signout_button').style.visibility = 'hidden';
 
   /**
    * Callback after api.js is loaded.
@@ -89,7 +117,7 @@ limitations under the License.
    */
   function maybeEnableButtons() {
     if (pickerInited && gisInited) {
-      document.getElementById('authorize_button').style.visibility = 'visible';
+      document.getElementById('authorize_button').classList.remove('hidden');
     }
   }
 
@@ -102,8 +130,8 @@ limitations under the License.
         throw (response);
       }
       accessToken = response.access_token;
-      document.getElementById('signout_button').style.visibility = 'visible';
-      document.getElementById('authorize_button').innerText = 'Refresh';
+      document.getElementById('signout_button').classList.remove('hidden');
+      document.getElementById('authorize_button').innerText = 'Open Picker Again';
       await createPicker();
     };
 
@@ -124,9 +152,9 @@ limitations under the License.
     if (accessToken) {
       google.accounts.oauth2.revoke(accessToken);
       accessToken = null;
-      document.getElementById('content').innerText = '';
-      document.getElementById('authorize_button').innerText = 'Authorize';
-      document.getElementById('signout_button').style.visibility = 'hidden';
+      document.getElementById('result-box').classList.add('hidden');
+      document.getElementById('authorize_button').innerText = 'Authorize & Open Picker';
+      document.getElementById('signout_button').classList.add('hidden');
     }
   }
 
@@ -134,14 +162,15 @@ limitations under the License.
    *  Create and render a Google Picker object for selecting folders.
    */
   function createPicker() {
-    // Tạo view cho folders thay vì documents
+    // Create view for folders
     const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-        .setSelectFolderEnabled(true)  // Cho phép select folders
-        .setIncludeFolders(true);       // Hiển thị folders trong danh sách
+        .setSelectFolderEnabled(true)
+        .setIncludeFolders(true)
+        .setMimeTypes('application/vnd.google-apps.folder');
     
     const picker = new google.picker.PickerBuilder()
         .enableFeature(google.picker.Feature.NAV_HIDDEN)
-        .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+        //.enableFeature(google.picker.Feature.MULTISELECT_ENABLED) // Single folder selection is safer for now
         .setDeveloperKey(API_KEY)
         .setAppId(APP_ID)
         .setOAuthToken(accessToken)
@@ -157,18 +186,26 @@ limitations under the License.
    */
   async function pickerCallback(data) {
     if (data.action === google.picker.Action.PICKED) {
-      let text = `Google Picker response: \n${JSON.stringify(data, null, 2)}\n`;
       const document = data[google.picker.Response.DOCUMENTS][0];
       const fileId = document[google.picker.Document.ID];
-      console.log(fileId);
-      const res = await gapi.client.drive.files.get({
-        'fileId': fileId,
-        'fields': '*',
-      });
-      text += `Drive API response for first document: \n${JSON.stringify(res.result, null, 2)}\n`;
-      window.document.getElementById('content').innerText = text;
+      const fileName = document[google.picker.Document.NAME];
+
+      const folderIdEl = window.document.getElementById('folder-id');
+      const folderNameEl = window.document.getElementById('folder-name');
+      const resultBox = window.document.getElementById('result-box');
+
+      folderIdEl.innerText = fileId;
+      folderNameEl.innerText = fileName;
+      resultBox.classList.remove('hidden');
     }
-  }  
+  }
+
+  function copyToClipboard() {
+      const copyText = document.getElementById("folder-id");
+      navigator.clipboard.writeText(copyText.innerText).then(() => {
+          alert("ID copied to clipboard!");
+      });
+  }
 </script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
