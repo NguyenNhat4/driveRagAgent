@@ -1,14 +1,19 @@
 import streamlit as st
 import os
 import streamlit.components.v1 as components
+from dotenv import load_dotenv
 from flow import create_ingestion_flow, create_retrieval_flow
 from utils.drive_tools import get_drive_service
 
+# Load environment variables
+load_dotenv()
+
 st.set_page_config(page_title="Google Drive RAG Agent", layout="wide")
 
-# Env Var Setup
+# Check for Gemini API Key
 if "GEMINI_API_KEY" not in os.environ:
-    os.environ["GEMINI_API_KEY"] = st.text_input("Enter Gemini API Key", type="password")
+    st.error("GEMINI_API_KEY not found in environment variables. Please check your .env file.")
+    st.stop()
 
 # Read Google App Credentials from Env
 CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -26,7 +31,7 @@ with tab1:
     st.markdown("""
     **Step 1: Pick a Folder**
     Click the button below to open Google Picker. Select a folder, and copy its ID.
-    *Note: Ensure your Service Account email has access to the folder.*
+    *Note: You will be asked to authenticate with Google if you haven't already.*
     """)
 
     if st.button("Open Google Picker"):
@@ -48,13 +53,10 @@ with tab1:
     if st.button("Start Ingestion"):
         if not folder_id_input:
             st.error("Please enter a Folder ID.")
-        elif not os.path.exists("service_account.json"):
-            st.error("service_account.json not found. Please upload it in the sidebar (if implemented) or place it in root.")
         else:
             with st.spinner("Loading files, chunking, and indexing... This may take a while."):
                 shared = {
-                    "folder_id": folder_id_input,
-                    "creds_path": "service_account.json"
+                    "folder_id": folder_id_input
                 }
 
                 try:
@@ -96,7 +98,9 @@ with tab2:
                 context = shared.get("retrieved_context", [])
                 with st.expander("View Retrieved Context"):
                     for c in context:
-                        st.markdown(f"**Source:** {c.payload['metadata']['source']}")
+                        metadata = c.payload.get('metadata', {})
+                        source = metadata.get('source', 'Unknown')
+                        st.markdown(f"**Source:** {source}")
                         st.text(c.payload['text'][:200] + "...")
                         st.divider()
 
