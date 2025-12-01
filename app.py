@@ -1,94 +1,144 @@
 import streamlit as st
 import os
-import tempfile
-from flow import create_rag_flow
+import json
+import streamlit.components.v1 as components
+from flow import create_ingestion_flow, create_retrieval_flow
+from utils.drive_tools import get_drive_service
 
 st.set_page_config(page_title="Google Drive RAG Agent", layout="wide")
 
-st.title("🤖 Chat with your Google Drive")
-st.write("Hỏi đáp thông tin từ tài liệu trong Google Drive của bạn (Tiếng Việt).")
+# Read Google App Credentials from credentials.json
+CLIENT_ID = ""
+APP_ID = ""
+API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-# Sidebar for configuration
-with st.sidebar:
-    st.header("Cấu hình")
+if os.path.exists("credentials.json"):
+    try:
+        with open("credentials.json", "r") as f:
+            creds_data = json.load(f)
+            # Handle different formats (installed vs web)
+            if 'installed' in creds_data:
+                CLIENT_ID = creds_data['installed'].get('client_id', '')
+            elif 'web' in creds_data:
+                CLIENT_ID = creds_data['web'].get('client_id', '')
 
-    # API Key
-    api_key = st.text_input("Gemini API Key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
-    if api_key:
-        os.environ["GEMINI_API_KEY"] = api_key
+            # App ID (Project Number) is usually not in credentials.json explicitly in the same way,
+            # but users might confuse Project ID with Project Number.
+            # For Picker, we need Project Number.
+            # If not found, we fallback to env var.
+            APP_ID = os.getenv("GOOGLE_APP_ID", "")
+    except Exception as e:
+        st.error(f"Error reading credentials.json: {e}")
 
-    # Service Account
-    st.subheader("Google Drive Auth")
-    uploaded_file = st.file_uploader("Upload service_account.json", type=["json"])
+st.title("🤖 Chat with your Google Drive (Hybrid Search)")
 
-    creds_path = "service_account.json"
-    if uploaded_file is not None:
-        # Save to a temp file or overwrite local (in a real app, handle securely)
-        # For this demo, we'll write to the current directory so the utils can find it
-        with open("service_account.json", "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.success("Credential file loaded!")
-    else:
-        if os.path.exists("service_account.json"):
-            st.info("Using existing service_account.json")
+# Check Env Vars
+if "GEMINI_API_KEY" not in os.environ:
+    st.warning("⚠️ GEMINI_API_KEY is missing from environment variables.")
+else:
+    # We rely on os.environ being set by the user or .env
+    pass
+
+if not API_KEY:
+    st.warning("⚠️ GOOGLE_API_KEY (for Picker) is missing from environment variables.")
+
+# Tabs
+tab1, tab2 = st.tabs(["📂 Ingest Data", "💬 Chat"])
+
+with tab1:
+    st.header("Ingest Folder")
+
+    st.markdown("""
+    **Step 1: Authenticate & Pick Folder**
+    1. Ensure `credentials.json` is in the root directory.
+    2. Click below to open Google Picker.
+    3. If this is your first time, you will be redirected to login (terminal or browser window) for the backend processing as well.
+    """)
+
+    if st.button("Open Google Picker"):
+        if not CLIENT_ID:
+            st.error("Client ID not found in credentials.json. Please check your setup.")
         else:
-            st.warning("Please upload service_account.json to access Drive.")
+            with open("templates/google_picker.html", "r") as f:
+                html_template = f.read()
 
-# Chat Interface
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+            # Inject Creds
+            html_content = html_template.replace("{client_id}", CLIENT_ID)\
+                                        .replace("{app_id}", APP_ID)\
+                                        .replace("{api_key}", API_KEY)
 
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+            components.html(html_content, height=600, scrolling=True)
 
-# Input
-if prompt := st.chat_input("Bạn muốn tìm gì trong Drive?"):
-    # Add user message to history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.markdown("---")
 
-    # Process
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        message_placeholder.markdown("Debugging: Đang suy nghĩ...")
+    st.markdown("**Step 2: Run Ingestion**")
+    folder_id_input = st.text_input("Paste Folder ID here:")
 
-        # Prepare Shared Store
-        shared = {
-            "user_query": prompt,
-            "creds_path": "service_account.json"
-        }
+    if st.button("Start Ingestion"):
+        if not folder_id_input:
+            st.error("Please enter a Folder ID.")
+        elif not os.path.exists("credentials.json"):
+            st.error("credentials.json not found. Please place it in the root directory.")
+        else:
+            with st.spinner("Authenticating and processing files... check your terminal if a login window doesn't appear."):
+                shared = {
+                    "folder_id": folder_id_input
+                }
 
-        # Run Flow
-        try:
-            rag_flow = create_rag_flow()
+                try:
+                    ingest_flow = create_ingestion_flow()
+                    ingest_flow.run(shared)
 
-            # We can visualize progress if we hook into the nodes or just check results after
-            # Since PocketFlow is synchronous (for now), we'll wait for result.
+                    st.success(shared.get("index_status", "Ingestion completed!"))
+                    docs = shared.get('documents', [])
+                    chunks = shared.get('chunks', [])
+                    if docs:
+                        st.info(f"Processed {len(docs)} files into {len(chunks)} chunks.")
+                    else:
+                        st.warning("No files found or processed. Check permissions or folder content.")
 
-            message_placeholder.markdown("🔍 Đang tìm kiếm file...")
-            rag_flow.run(shared)
+                except Exception as e:
+                    st.error(f"Ingestion failed: {e}")
 
-            # Check intermediate steps to show progress info
-            status_text = ""
-            if "search_term" in shared:
-                status_text += f"ℹ️ Đã tìm kiếm với từ khóa: `{shared['search_term']}`\n\n"
+with tab2:
+    st.header("Chat with Data")
 
-            files = shared.get("files_found", [])
-            if files:
-                status_text += f"📄 Đã tìm thấy file: **{files[0]['name']}**\n\n"
-            elif shared.get("search_term") != "NONE":
-                status_text += "❌ Không tìm thấy file phù hợp.\n\n"
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-            final_answer = shared.get("answer", "Xin lỗi, đã có lỗi xảy ra.")
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-            full_response = status_text + final_answer
-            message_placeholder.markdown(full_response)
+    if prompt := st.chat_input("Ask something about your documents..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-            # Add to history
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            message_placeholder.markdown("Thinking...")
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+            shared = {"user_query": prompt}
+
+            try:
+                retrieval_flow = create_retrieval_flow()
+                retrieval_flow.run(shared)
+
+                # Show retrieved snippets (optional debug)
+                context = shared.get("retrieved_context", [])
+                with st.expander("View Retrieved Context"):
+                    if context:
+                        for c in context:
+                            st.markdown(f"**Source:** {c.payload['metadata']['source']}")
+                            st.text(c.payload['text'][:200] + "...")
+                            st.divider()
+                    else:
+                        st.write("No context retrieved.")
+
+                answer = shared.get("answer", "I couldn't generate an answer.")
+                message_placeholder.markdown(answer)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+
+            except Exception as e:
+                st.error(f"Error: {e}")

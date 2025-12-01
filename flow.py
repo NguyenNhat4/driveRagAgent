@@ -1,24 +1,29 @@
 from pocketflow import Flow
-from nodes import ExtractSearchTermNode, SearchDriveNode, ReadDocumentNode, AnswerNode
+from nodes import (
+    ExtractSearchTermNode,
+    AnswerNode,
+    LoadFolderNode,
+    ChunkNode,
+    QdrantIndexNode,
+    QdrantSearchNode
+)
 
-def create_rag_flow():
-    # Instantiate nodes
-    extract = ExtractSearchTermNode()
-    search = SearchDriveNode()
-    read = ReadDocumentNode()
+def create_ingestion_flow():
+    load = LoadFolderNode()
+    chunk = ChunkNode()
+    index = QdrantIndexNode()
+
+    load >> chunk >> index
+
+    return Flow(start=load)
+
+def create_retrieval_flow():
+    # We can skip extraction if we trust the raw query or use Qdrant's query_text
+    # But let's keep it simple: Query -> Search -> Answer
+
+    search = QdrantSearchNode()
     answer = AnswerNode()
 
-    # Define transitions
-    # Extract -> Search
-    extract >> search
-    extract - "skip_search" >> answer # If just chit-chat
+    search >> answer
 
-    # Search -> Read or Answer (if not found)
-    search - "found" >> read
-    search - "not_found" >> answer
-
-    # Read -> Answer
-    read >> answer
-
-    # Create Flow
-    return Flow(start=extract)
+    return Flow(start=search)
