@@ -62,14 +62,13 @@ class LoadFolderNode(Node):
     Node to load all files from a specific Google Drive Folder ID.
     """
     def prep(self, shared):
-        return shared.get("folder_id"), shared.get("creds_path", "service_account.json")
+        return shared.get("folder_id")
 
-    def exec(self, inputs):
-        folder_id, creds_path = inputs
+    def exec(self, folder_id):
         if not folder_id:
             raise ValueError("No Folder ID provided.")
 
-        service = get_drive_service(creds_path)
+        service = get_drive_service()
         if not service:
             raise RuntimeError("Could not create Drive Service.")
 
@@ -91,7 +90,7 @@ class LoadFolderNode(Node):
 
             logger.info(f"Reading file: {f['name']}")
             try:
-                content = read_file(f['id'], f['mimeType'], creds_path)
+                content = read_file(f['id'], f['mimeType'])
                 if content and isinstance(content, str) and len(content.strip()) > 0:
                      documents.append({"name": f['name'], "id": f['id'], "content": content})
             except Exception as e:
