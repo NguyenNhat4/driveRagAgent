@@ -2,19 +2,78 @@ import os
 import io
 import pickle
 import logging
+from typing import Optional, List, Dict, Any
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
 import pdfplumber
 import docx2txt
+import streamlit as st
+import streamlit.components.v1 as components
+
+
+# Constants
+SCOPES = ['https://www.googleapis.com/auth/drive.metadata.readonly']
+TOKEN_FILE = "token.json"
+CREDENTIALS_FILE = "credentials.json"
+DEFAULT_PORT = 8080
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+def get_credentials() -> Optional[Credentials]:
+    """
+    Get valid user credentials from storage or initiate OAuth flow.
+    
+    Returns:
+        Valid Credentials object, or None if authentication fails.
+    """
+    creds = None
+    
+    # Try to load existing credentials
+    if os.path.exists(TOKEN_FILE):
+        try:
+            creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+        except ValueError as e:
+            print(f"Token file is invalid: {e}")
+            print("Deleting token.json and creating new one...")
+            os.remove(TOKEN_FILE)
+    
+    # Refresh or create new credentials if needed
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            print("Refreshing access token...")
+            creds.refresh(Request())
+        else:
+            print("Starting OAuth flow...")
+            if not os.path.exists(CREDENTIALS_FILE):
+                raise FileNotFoundError(
+                    f"{CREDENTIALS_FILE} not found. Please download it from Google Cloud Console."
+                )
+            
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CREDENTIALS_FILE, 
+                SCOPES
+            )
+            creds = flow.run_local_server(
+                port=DEFAULT_PORT,
+                access_type='offline',
+                prompt='consent'
+            )
+        
+        # Save credentials for next run
+        with open(TOKEN_FILE, "w") as token:
+            token.write(creds.to_json())
+        print(f"Credentials saved to {TOKEN_FILE}")
+    
+    return creds
 
+@st.cache_resource
 def get_drive_service(creds_path="service_account.json"):
     """Authentication to Google Drive"""
     creds = None
