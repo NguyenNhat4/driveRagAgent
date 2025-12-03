@@ -9,7 +9,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
-from google.oauth2 import service_account
 import pdfplumber
 import docx2txt
 import streamlit as st
@@ -17,7 +16,7 @@ import streamlit.components.v1 as components
 
 
 # Constants
-SCOPES = ['https://www.googleapis.com/auth/drive.metadata.readonly']
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.metadata.readonly']
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 DEFAULT_PORT = 8080
@@ -40,17 +39,25 @@ def get_credentials() -> Optional[Credentials]:
         try:
             creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
         except ValueError as e:
-            print(f"Token file is invalid: {e}")
-            print("Deleting token.json and creating new one...")
+            logger.warning(f"Token file is invalid: {e}")
+            logger.info("Deleting token.json and creating new one...")
             os.remove(TOKEN_FILE)
     
     # Refresh or create new credentials if needed
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            print("Refreshing access token...")
-            creds.refresh(Request())
-        else:
-            print("Starting OAuth flow...")
+            logger.info("Refreshing access token...")
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                logger.error(f"Error refreshing token: {e}")
+                logger.info("Deleting invalid token and re-authenticating...")
+                if os.path.exists(TOKEN_FILE):
+                    os.remove(TOKEN_FILE)
+                creds = None
+
+        if not creds:
+            logger.info("Starting OAuth flow...")
             if not os.path.exists(CREDENTIALS_FILE):
                 raise FileNotFoundError(
                     f"{CREDENTIALS_FILE} not found. Please download it from Google Cloud Console."
@@ -69,30 +76,23 @@ def get_credentials() -> Optional[Credentials]:
         # Save credentials for next run
         with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
-        print(f"Credentials saved to {TOKEN_FILE}")
+        logger.info(f"Credentials saved to {TOKEN_FILE}")
     
     return creds
 
 @st.cache_resource
-def get_drive_service(creds_path="service_account.json"):
+def get_drive_service():
     """Authentication to Google Drive"""
-    creds = None
-    if os.path.exists(creds_path):
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                creds_path, scopes=SCOPES)
-        except Exception as e:
-            logger.error(f"Error loading service account: {e}")
-            return None
-    else:
-        logger.warning(f"Service account file not found at {creds_path}")
+    creds = get_credentials()
+    if not creds:
+        logger.error("Could not obtain valid credentials.")
         return None
 
     return build('drive', 'v3', credentials=creds)
 
-def search_files(query_name, creds_path="service_account.json"):
+def search_files(query_name):
     """Search for files by name containing the query_name."""
-    service = get_drive_service(creds_path)
+    service = get_drive_service()
     if not service:
         return []
 
@@ -107,9 +107,9 @@ def search_files(query_name, creds_path="service_account.json"):
         logger.error(f"An error occurred during search: {e}")
         return []
 
-def read_file(file_id, mime_type, creds_path="service_account.json"):
+def read_file(file_id, mime_type):
     """Downloads and extracts text from a file."""
-    service = get_drive_service(creds_path)
+    service = get_drive_service()
     if not service:
         return "Error: Could not connect to Drive."
 
@@ -136,14 +136,13 @@ def read_file(file_id, mime_type, creds_path="service_account.json"):
                     text += page.extract_text() or ""
             return text
         elif 'wordprocessingml' in mime_type: # docx
-            # docx2txt needs a file path or file-like object
-            # implementing a workaround or using a temp file might be needed
-            # but docx2txt.process supports file-like objects? No, usually path.
-            # Let's try writing to temp.
             with open("temp.docx", "wb") as f:
                 f.write(fh.read())
-            text = docx2txt.process("temp.docx")
-            os.remove("temp.docx")
+            try:
+                text = docx2txt.process("temp.docx")
+            finally:
+                if os.path.exists("temp.docx"):
+                    os.remove("temp.docx")
             return text
         else:
             # Assume plain text
@@ -155,8 +154,11 @@ def read_file(file_id, mime_type, creds_path="service_account.json"):
 
 if __name__ == "__main__":
     # Mock test if no creds
-    if not os.path.exists("service_account.json"):
-        print("No service_account.json found. Skipping integration test.")
+    if not os.path.exists("credentials.json"):
+        print("No credentials.json found. Skipping integration test.")
     else:
-        files = search_files("test")
-        print(f"Found: {files}")
+        try:
+            files = search_files("test")
+            print(f"Found: {files}")
+        except Exception as e:
+             print(f"Test failed: {e}")
