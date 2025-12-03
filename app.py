@@ -1,8 +1,12 @@
 import streamlit as st
 import os
 import streamlit.components.v1 as components
+from dotenv import load_dotenv
 from flow import create_ingestion_flow, create_retrieval_flow
 from utils.drive_tools import get_drive_service
+
+# Load environment variables
+load_dotenv()
 
 st.set_page_config(page_title="Google Drive RAG Agent", layout="wide")
 
@@ -26,7 +30,7 @@ with tab1:
     st.markdown("""
     **Step 1: Pick a Folder**
     Click the button below to open Google Picker. Select a folder, and copy its ID.
-    *Note: Ensure your Service Account email has access to the folder.*
+    *Note: Ensure you have authorized the app.*
     """)
 
     if st.button("Open Google Picker"):
@@ -48,13 +52,12 @@ with tab1:
     if st.button("Start Ingestion"):
         if not folder_id_input:
             st.error("Please enter a Folder ID.")
-        elif not os.path.exists("service_account.json"):
-            st.error("service_account.json not found. Please upload it in the sidebar (if implemented) or place it in root.")
+        elif not os.path.exists("credentials.json"):
+            st.error("credentials.json not found. Please setup your Google Cloud Project and download the credentials file.")
         else:
             with st.spinner("Loading files, chunking, and indexing... This may take a while."):
                 shared = {
-                    "folder_id": folder_id_input,
-                    "creds_path": "service_account.json"
+                    "folder_id": folder_id_input
                 }
 
                 try:
