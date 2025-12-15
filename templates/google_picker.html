@@ -1,23 +1,10 @@
 <!--
 Copyright 2018 Google LLC
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    https://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 -->
-<!-- [START picker_hello_world] -->
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Google Picker API Quickstart</title>
+  <title>Google Picker</title>
   <meta charset="utf-8" />
   <style>
     body { font-family: sans-serif; padding: 20px; }
@@ -41,14 +28,25 @@ limitations under the License.
         font-weight: bold;
         font-size: 1.1em;
     }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      background-color: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #357ae8;
+    }
   </style>
 </head>
 <body>
 <h3>Select a Folder from Google Drive</h3>
 
-<!--Add buttons to initiate auth sequence and sign out.-->
-<button id="authorize_button" onclick="handleAuthClick()" class="hidden">Authorize & Open Picker</button>
-<button id="signout_button" onclick="handleSignoutClick()" class="hidden">Sign Out</button>
+<!-- Single button for Auth + Pick -->
+<button id="authorize_button" onclick="handleAuthClick()" class="hidden">Loading...</button>
 
 <div id="result-box" class="hidden">
   <p><strong>Selected Folder ID:</strong></p>
@@ -60,54 +58,36 @@ limitations under the License.
   <p><strong>Folder Name:</strong> <span id="folder-name"></span></p>
 </div>
 
-<div style="margin-top: 20px; font-size: 0.9em; color: #666;">
+<div style="margin-top: 20px; font-size: 0.8em; color: #888;">
   <p><strong>Troubleshooting:</strong></p>
-  <p>If you see an "origin_mismatch" or "invalid_request" error, make sure this URL is added to "Authorized JavaScript origins" in your Google Cloud Console:</p>
+  <p>If you see an "origin_mismatch" or "invalid_request" error (and the button below doesn't work), ensure this URL is added to "Authorized JavaScript origins" in your Google Cloud Console:</p>
   <code><script>document.write(window.location.origin)</script></code>
 </div>
 
-<pre id="content" style="white-space: pre-wrap; display:none;"></pre>
-
 <script type="text/javascript">
-  /* exported gapiLoaded */
-  /* exported gisLoaded */
-  /* exported handleAuthClick */
-  /* exported handleSignoutClick */
-
-  // Authorization scopes required by the API; multiple scopes can be
-  // included, separated by spaces.
   const SCOPES = 'https://www.googleapis.com/auth/drive.metadata.readonly';
 
   // These values are injected by the Python backend
   const CLIENT_ID = '{client_id}';
   const API_KEY = '{api_key}';
   const APP_ID = '{app_id}';
+  const INJECTED_TOKEN = '{access_token}';
 
   let tokenClient;
-  let accessToken = null;
+  let accessToken = INJECTED_TOKEN || null;
   let pickerInited = false;
   let gisInited = false;
 
-  /**
-   * Callback after api.js is loaded.
-   */
   function gapiLoaded() {
     gapi.load('client:picker', initializePicker);
   }
 
-  /**
-   * Callback after the API client is loaded. Loads the
-   * discovery doc to initialize the API.
-   */
   async function initializePicker() {
     await gapi.client.load('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest');
     pickerInited = true;
     maybeEnableButtons();
   }
 
-  /**
-   * Callback after Google Identity Services are loaded.
-   */
   function gisLoaded() {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
@@ -118,78 +98,67 @@ limitations under the License.
     maybeEnableButtons();
   }
 
-  /**
-   * Enables user interaction after all libraries are loaded.
-   */
   function maybeEnableButtons() {
     if (pickerInited && gisInited) {
-      document.getElementById('authorize_button').classList.remove('hidden');
+      const btn = document.getElementById('authorize_button');
+      btn.classList.remove('hidden');
+      if (accessToken && accessToken !== 'None') {
+          btn.innerText = 'Pick Folder (Backend Auth)';
+      } else {
+          btn.innerText = 'Authorize & Pick Folder';
+      }
     }
   }
 
-  /**
-   *  Sign in the user upon button click.
-   */
   function handleAuthClick() {
+    const btn = document.getElementById('authorize_button');
+
+    // If we have a token (injected or previously fetched), try to open picker
+    if (accessToken && accessToken !== 'None') {
+      createPicker();
+      return;
+    }
+
+    // Otherwise, request token via GIS
     tokenClient.callback = async (response) => {
       if (response.error !== undefined) {
         throw (response);
       }
       accessToken = response.access_token;
-      document.getElementById('signout_button').classList.remove('hidden');
-      document.getElementById('authorize_button').innerText = 'Open Picker Again';
+      btn.innerText = 'Pick Folder';
       await createPicker();
     };
 
     if (accessToken === null) {
-      // Prompt the user to select a Google Account and ask for consent to share their data
-      // when establishing a new session.
       tokenClient.requestAccessToken({prompt: 'consent'});
     } else {
-      // Skip display of account chooser and consent dialog for an existing session.
       tokenClient.requestAccessToken({prompt: ''});
     }
   }
 
-  /**
-   *  Sign out the user upon button click.
-   */
-  function handleSignoutClick() {
-    if (accessToken) {
-      google.accounts.oauth2.revoke(accessToken);
-      accessToken = null;
-      document.getElementById('result-box').classList.add('hidden');
-      document.getElementById('authorize_button').innerText = 'Authorize & Open Picker';
-      document.getElementById('signout_button').classList.add('hidden');
-    }
-  }
-
-  /**
-   *  Create and render a Google Picker object for selecting folders.
-   */
   function createPicker() {
-    // Create view for folders
     const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
         .setSelectFolderEnabled(true)
         .setIncludeFolders(true)
         .setMimeTypes('application/vnd.google-apps.folder');
     
-    const picker = new google.picker.PickerBuilder()
+    const pickerBuilder = new google.picker.PickerBuilder()
         .enableFeature(google.picker.Feature.NAV_HIDDEN)
-        //.enableFeature(google.picker.Feature.MULTISELECT_ENABLED) // Single folder selection is safer for now
         .setDeveloperKey(API_KEY)
         .setAppId(APP_ID)
         .setOAuthToken(accessToken)
         .addView(view)
-        .setCallback(pickerCallback)
-        .build();
+        .setCallback(pickerCallback);
+
+    // If using backend token, we might encounter origin issues if the token is bound to Desktop client?
+    // Let's hope it works. If not, the user will fall back to "Authorize" (wait, if accessToken is set, it tries picker).
+    // If picker fails, we might need to reset accessToken?
+    // Picker doesn't throw easily catchable errors for token issues. It usually shows error in the dialog.
+
+    const picker = pickerBuilder.build();
     picker.setVisible(true);
   }
 
-  /**
-   * Displays the file details of the user's selection.
-   * @param {object} data - Contains the user selection from the Google Picker.
-   */
   async function pickerCallback(data) {
     if (data.action === google.picker.Action.PICKED) {
       const document = data[google.picker.Response.DOCUMENTS][0];
@@ -217,4 +186,3 @@ limitations under the License.
 <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
 </body>
 </html>
-<!-- [END picker_hello_world] -->

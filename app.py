@@ -3,7 +3,7 @@ import os
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from flow import create_ingestion_flow, create_retrieval_flow
-from utils.drive_tools import get_drive_service
+from utils.drive_tools import get_drive_service, get_access_token
 from utils.embedding_models import get_embedding_models
 
 # Load environment variables
@@ -38,16 +38,19 @@ with tab1:
     *Note: Ensure you have authorized the app.*
     """)
 
-    if st.button("Open Google Picker"):
-        with open("templates/google_picker.html", "r") as f:
-            html_template = f.read()
+    with open("templates/google_picker.html", "r") as f:
+        html_template = f.read()
 
-        # Inject Creds
-        html_content = html_template.replace("{client_id}", CLIENT_ID)\
-                                    .replace("{app_id}", APP_ID)\
-                                    .replace("{api_key}", API_KEY)
+    # Try to get backend token to bypass frontend auth
+    access_token = get_access_token()
 
-        components.html(html_content, height=600, scrolling=True)
+    # Inject Creds
+    html_content = html_template.replace("{client_id}", CLIENT_ID)\
+                                .replace("{app_id}", APP_ID)\
+                                .replace("{api_key}", API_KEY)\
+                                .replace("{access_token}", access_token if access_token else "")
+
+    components.html(html_content, height=600, scrolling=True)
 
     st.markdown("---")
 

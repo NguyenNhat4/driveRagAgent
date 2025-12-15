@@ -25,10 +25,13 @@ DEFAULT_PORT = 8080
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_credentials() -> Optional[Credentials]:
+def get_credentials(allow_interactive=True) -> Optional[Credentials]:
     """
     Get valid user credentials from storage or initiate OAuth flow.
     
+    Args:
+        allow_interactive: If True, initiates OAuth flow if credentials are missing/invalid.
+
     Returns:
         Valid Credentials object, or None if authentication fails.
     """
@@ -57,6 +60,10 @@ def get_credentials() -> Optional[Credentials]:
                 creds = None
 
         if not creds:
+            if not allow_interactive:
+                logger.info("Interactive auth disabled, returning None.")
+                return None
+
             logger.info("Starting OAuth flow...")
             if not os.path.exists(CREDENTIALS_FILE):
                 raise FileNotFoundError(
@@ -79,6 +86,16 @@ def get_credentials() -> Optional[Credentials]:
         logger.info(f"Credentials saved to {TOKEN_FILE}")
     
     return creds
+
+def get_access_token() -> Optional[str]:
+    """
+    Get the current valid access token.
+    Refreshes if necessary, but does not start interactive flow.
+    """
+    creds = get_credentials(allow_interactive=False)
+    if creds and creds.valid:
+        return creds.token
+    return None
 
 # Global variable to cache the service instance
 _DRIVE_SERVICE = None
