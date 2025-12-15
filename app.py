@@ -4,11 +4,16 @@ import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from flow import create_ingestion_flow, create_retrieval_flow
 from utils.drive_tools import get_drive_service
+from utils.embedding_models import get_embedding_models
 
 # Load environment variables
 load_dotenv()
 
 st.set_page_config(page_title="Google Drive RAG Agent", layout="wide")
+
+# Pre-load embedding models
+with st.spinner("Initializing AI Models..."):
+    get_embedding_models()
 
 # Env Var Setup
 if "GEMINI_API_KEY" not in os.environ:

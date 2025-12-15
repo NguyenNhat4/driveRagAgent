@@ -7,7 +7,7 @@ import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, SparseVectorParams, Filter, FieldCondition, MatchValue, Prefetch, SparseVector
-from fastembed import TextEmbedding, SparseTextEmbedding, LateInteractionTextEmbedding
+from utils.embedding_models import get_embedding_models
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -184,18 +184,8 @@ class QdrantIndexNode(Node):
         client = QdrantClient(path=db_path)
         collection_name = "drive_docs"
 
-        # Initialize Embedding Models
-        # Dense
-        dense_model_name = "BAAI/bge-small-en-v1.5"
-        dense_model = TextEmbedding(model_name=dense_model_name)
-
-        # Sparse (BM25)
-        sparse_model_name = "prithivida/Splade_PP_en_v1"
-        sparse_model = SparseTextEmbedding(model_name=sparse_model_name)
-
-        # ColBERT (Late Interaction)
-        colbert_model_name = "colbert-ir/colbertv2.0"
-        colbert_model = LateInteractionTextEmbedding(model_name=colbert_model_name)
+        # Get cached models
+        dense_model, sparse_model, colbert_model = get_embedding_models()
 
         # Check if collection exists and create if NOT exists (incremental update)
         if not client.collection_exists(collection_name):
@@ -270,10 +260,8 @@ class QdrantSearchNode(Node):
         client = QdrantClient(path=db_path)
         collection_name = "drive_docs"
 
-        # Initialize models for query embedding
-        dense_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-        sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
-        colbert_model = LateInteractionTextEmbedding(model_name="colbert-ir/colbertv2.0")
+        # Get cached models
+        dense_model, sparse_model, colbert_model = get_embedding_models()
 
         # Generate query embeddings
         # Models expect list of strings
