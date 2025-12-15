@@ -80,15 +80,22 @@ def get_credentials() -> Optional[Credentials]:
     
     return creds
 
-@st.cache_resource
+# Global variable to cache the service instance
+_DRIVE_SERVICE = None
+
 def get_drive_service():
     """Authentication to Google Drive"""
+    global _DRIVE_SERVICE
+    if _DRIVE_SERVICE:
+        return _DRIVE_SERVICE
+
     creds = get_credentials()
     if not creds:
         logger.error("Could not obtain valid credentials.")
         return None
 
-    return build('drive', 'v3', credentials=creds)
+    _DRIVE_SERVICE = build('drive', 'v3', credentials=creds)
+    return _DRIVE_SERVICE
 
 def search_files(query_name):
     """Search for files by name containing the query_name."""

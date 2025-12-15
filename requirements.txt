@@ -9,3 +9,4 @@ qdrant-client[fastembed]
 langchain-text-splitters
 langchain-core
 python-dotenv
+fastmcp

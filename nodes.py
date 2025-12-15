@@ -2,10 +2,12 @@ from pocketflow import Node
 from utils.call_llm import call_llm
 from utils.drive_tools import search_files, read_file, get_drive_service
 import os
+import uuid
 import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, SparseVectorParams, Filter, FieldCondition, MatchValue, Prefetch, SparseVector
+from fastembed import TextEmbedding, SparseTextEmbedding, LateInteractionTextEmbedding
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +62,7 @@ class AnswerNode(Node):
 class LoadFolderNode(Node):
     """
     Node to load all files from a specific Google Drive Folder ID.
+    Checks if files are already indexed in Qdrant to avoid redundant processing.
     """
     def prep(self, shared):
         return shared.get("folder_id")
@@ -81,12 +84,36 @@ class LoadFolderNode(Node):
         files = results.get('files', [])
         logger.info(f"Found {len(files)} files in folder {folder_id}")
 
+        # Check existing files in Qdrant
+        db_path = "./qdrant_db"
+        collection_name = "drive_docs"
+        client = QdrantClient(path=db_path)
+
+        # We process files one by one and check existence
         documents = []
         for f in files:
-            # We skip folders inside folders for this simple iteration,
-            # but could be recursive in a real app.
+            # We skip folders inside folders for this simple iteration
             if f['mimeType'] == 'application/vnd.google-apps.folder':
                 continue
+
+            file_id = f['id']
+
+            # Check if this file is already indexed
+            if client.collection_exists(collection_name):
+                count_result = client.count(
+                    collection_name=collection_name,
+                    count_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="file_id",
+                                match=MatchValue(value=file_id)
+                            )
+                        ]
+                    )
+                )
+                if count_result.count > 0:
+                    logger.info(f"Skipping file {f['name']} (ID: {file_id}) - already indexed.")
+                    continue
 
             logger.info(f"Reading file: {f['name']}")
             try:
@@ -141,7 +168,7 @@ class ChunkNode(Node):
 
 class QdrantIndexNode(Node):
     """
-    Node to index chunks into Qdrant using FastEmbed for Hybrid Search.
+    Node to index chunks into Qdrant using FastEmbed for Hybrid Search (Dense + Sparse + ColBERT).
     """
     def prep(self, shared):
         return shared.get("chunks", [])
@@ -150,45 +177,79 @@ class QdrantIndexNode(Node):
         if not chunks:
             return "No chunks to index."
 
-        # Initialize Qdrant Client (In-Memory)
-        # In a real app, you might persist this to disk or a server
-        # client = QdrantClient(":memory:")
-
-        # We need to store the client in a persistent place (like Streamlit session state)
-        # BUT PocketFlow nodes are transient.
-        # For this demo, we will re-create the collection every time we ingest,
-        # which means previous data is lost if we restart.
-        # To fix this in a persistent way, we would use a path on disk.
-
-        # Let's use a local path to persist data across runs
         db_path = "./qdrant_db"
         if not os.path.exists(db_path):
             os.makedirs(db_path)
 
         client = QdrantClient(path=db_path)
-
         collection_name = "drive_docs"
 
-        # Check if collection exists, if not create it
-        # Note: When using FastEmbed (add/query), we don't strictly need to define vector config manually
-        # if we rely on the library defaults, but it's good practice.
-        # However, qdrant-client's `add` method handles it.
+        # Initialize Embedding Models
+        # Dense
+        dense_model_name = "BAAI/bge-small-en-v1.5"
+        dense_model = TextEmbedding(model_name=dense_model_name)
 
-        # Prepare documents and metadata
-        docs = [c['text'] for c in chunks]
-        metadatas = [c['metadata'] for c in chunks]
-        ids = list(range(len(docs))) # Simple integer IDs
+        # Sparse (BM25)
+        sparse_model_name = "prithivida/Splade_PP_en_v1"
+        sparse_model = SparseTextEmbedding(model_name=sparse_model_name)
 
-        logger.info("Indexing chunks into Qdrant...")
-        client.add(
+        # ColBERT (Late Interaction)
+        colbert_model_name = "colbert-ir/colbertv2.0"
+        colbert_model = LateInteractionTextEmbedding(model_name=colbert_model_name)
+
+        # Check if collection exists and create if NOT exists (incremental update)
+        if not client.collection_exists(collection_name):
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config={
+                    "dense": VectorParams(size=384, distance=Distance.COSINE),
+                    "colbert": VectorParams(size=128, distance=Distance.COSINE, multivector_config={"comparator": "max_sim"}),
+                },
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams(index=None) # Default index
+                }
+            )
+
+        logger.info("Generating embeddings and indexing...")
+
+        # Process in batches (if needed, but simple list for now)
+        docs_text = [c['text'] for c in chunks]
+
+        # Generate all embeddings
+        # Generators return iterables, we consume them
+        dense_embeddings = list(dense_model.embed(docs_text))
+        sparse_embeddings = list(sparse_model.embed(docs_text))
+        colbert_embeddings = list(colbert_model.embed(docs_text))
+
+        points = []
+        for i, text in enumerate(docs_text):
+            # Deterministic UUID for idempotency
+            # Combine file_id and chunk_index to make a unique ID string
+            file_id = chunks[i]['metadata']['file_id']
+            chunk_idx = chunks[i]['metadata']['chunk_index']
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{file_id}_{chunk_idx}"))
+
+            # Create PointStruct
+            points.append(PointStruct(
+                id=point_id,
+                vector={
+                    "dense": dense_embeddings[i].tolist(),
+                    "colbert": colbert_embeddings[i].tolist(),
+                    "sparse": sparse_embeddings[i].as_object()
+                },
+                payload={
+                    "text": text,
+                    **chunks[i]['metadata']
+                }
+            ))
+
+        # Upsert
+        client.upsert(
             collection_name=collection_name,
-            documents=docs,
-            metadata=metadatas,
-            ids=ids,
-            parallel=0 # Use all cores
+            points=points
         )
 
-        return f"Successfully indexed {len(docs)} chunks."
+        return f"Successfully indexed {len(chunks)} chunks with Hybrid + ColBERT embeddings."
 
     def post(self, shared, prep_res, exec_res):
         shared["index_status"] = exec_res
@@ -196,7 +257,7 @@ class QdrantIndexNode(Node):
 
 class QdrantSearchNode(Node):
     """
-    Node to search Qdrant using Hybrid Search.
+    Node to search Qdrant using Hybrid Search and Late Interaction Re-ranking.
     """
     def prep(self, shared):
         return shared.get("user_query")
@@ -209,16 +270,53 @@ class QdrantSearchNode(Node):
         client = QdrantClient(path=db_path)
         collection_name = "drive_docs"
 
+        # Initialize models for query embedding
+        dense_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
+        colbert_model = LateInteractionTextEmbedding(model_name="colbert-ir/colbertv2.0")
+
+        # Generate query embeddings
+        # Models expect list of strings
+        query_dense = list(dense_model.embed([user_query]))[0]
+        query_sparse = list(sparse_model.embed([user_query]))[0]
+        query_colbert = list(colbert_model.embed([user_query]))[0]
+
+        dense_vec = query_dense.tolist()
+        sparse_vec = SparseVector(**query_sparse.as_object())
+        colbert_vec = query_colbert.tolist()
+
         try:
-             # Hybrid search happens automatically if the collection was created with `add`
-             results = client.query(
-                collection_name=collection_name,
-                query_text=user_query,
-                limit=5
-            )
+             # Hybrid Search (Dense + Sparse) Prefetch
+             # We fetch more candidates to re-rank with ColBERT
+
+             results = client.query_points(
+                 collection_name=collection_name,
+                 prefetch=[
+                     # Prefetch with Dense
+                     Prefetch(
+                         query=dense_vec,
+                         using="dense",
+                         limit=20
+                     ),
+                     # Prefetch with Sparse
+                     Prefetch(
+                         query=sparse_vec,
+                         using="sparse",
+                         limit=20
+                     )
+                 ],
+                 # Main query using ColBERT to re-rank the prefetched results
+                 query=colbert_vec,
+                 using="colbert",
+                 limit=5
+             ).points
+
              return results
+
         except Exception as e:
-            logger.warning(f"Search failed (maybe collection empty?): {e}")
+            logger.error(f"Search failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
 
     def post(self, shared, prep_res, exec_res):
