@@ -7,7 +7,7 @@ import logging
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, SparseVectorParams, Filter, FieldCondition, MatchValue, Prefetch, SparseVector
-from fastembed import TextEmbedding, SparseTextEmbedding, LateInteractionTextEmbedding
+from utils.embedding_models import get_embedding_models
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -86,7 +86,7 @@ class LoadFolderNode(Node):
 
         # Check existing files in Qdrant
         db_path = "./qdrant_db"
-        collection_name = "drive_docs"
+        collection_name = "drive_docs_vn"
         client = QdrantClient(path=db_path)
 
         # We process files one by one and check existence
@@ -182,20 +182,10 @@ class QdrantIndexNode(Node):
             os.makedirs(db_path)
 
         client = QdrantClient(path=db_path)
-        collection_name = "drive_docs"
+        collection_name = "drive_docs_vn"
 
-        # Initialize Embedding Models
-        # Dense
-        dense_model_name = "BAAI/bge-small-en-v1.5"
-        dense_model = TextEmbedding(model_name=dense_model_name)
-
-        # Sparse (BM25)
-        sparse_model_name = "prithivida/Splade_PP_en_v1"
-        sparse_model = SparseTextEmbedding(model_name=sparse_model_name)
-
-        # ColBERT (Late Interaction)
-        colbert_model_name = "colbert-ir/colbertv2.0"
-        colbert_model = LateInteractionTextEmbedding(model_name=colbert_model_name)
+        # Get cached models
+        dense_model, sparse_model, colbert_model = get_embedding_models()
 
         # Check if collection exists and create if NOT exists (incremental update)
         if not client.collection_exists(collection_name):
@@ -203,7 +193,7 @@ class QdrantIndexNode(Node):
                 collection_name=collection_name,
                 vectors_config={
                     "dense": VectorParams(size=384, distance=Distance.COSINE),
-                    "colbert": VectorParams(size=128, distance=Distance.COSINE, multivector_config={"comparator": "max_sim"}),
+                    "colbert": VectorParams(size=96, distance=Distance.COSINE, multivector_config={"comparator": "max_sim"}),
                 },
                 sparse_vectors_config={
                     "sparse": SparseVectorParams(index=None) # Default index
@@ -268,12 +258,10 @@ class QdrantSearchNode(Node):
 
         db_path = "./qdrant_db"
         client = QdrantClient(path=db_path)
-        collection_name = "drive_docs"
+        collection_name = "drive_docs_vn"
 
-        # Initialize models for query embedding
-        dense_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-        sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
-        colbert_model = LateInteractionTextEmbedding(model_name="colbert-ir/colbertv2.0")
+        # Get cached models
+        dense_model, sparse_model, colbert_model = get_embedding_models()
 
         # Generate query embeddings
         # Models expect list of strings
