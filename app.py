@@ -42,7 +42,11 @@ with tab1:
         html_template = f.read()
 
     # Try to get backend token to bypass frontend auth
-    access_token = get_access_token()
+    # Allow interactive auth if token is missing, ensuring we have a valid token for the Picker
+    if not os.path.exists("token.json"):
+        st.info("Initiating Google Login... Please check your browser or terminal.")
+
+    access_token = get_access_token(allow_interactive=True)
 
     # Inject Creds
     html_content = html_template.replace("{client_id}", CLIENT_ID)\

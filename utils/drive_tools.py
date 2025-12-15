@@ -87,12 +87,15 @@ def get_credentials(allow_interactive=True) -> Optional[Credentials]:
     
     return creds
 
-def get_access_token() -> Optional[str]:
+def get_access_token(allow_interactive=False) -> Optional[str]:
     """
     Get the current valid access token.
-    Refreshes if necessary, but does not start interactive flow.
+    Refreshes if necessary.
+
+    Args:
+        allow_interactive: If True, triggers OAuth flow if credentials are missing.
     """
-    creds = get_credentials(allow_interactive=False)
+    creds = get_credentials(allow_interactive=allow_interactive)
     if creds and creds.valid:
         return creds.token
     return None
