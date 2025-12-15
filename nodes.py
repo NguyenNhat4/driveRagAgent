@@ -86,7 +86,7 @@ class LoadFolderNode(Node):
 
         # Check existing files in Qdrant
         db_path = "./qdrant_db"
-        collection_name = "drive_docs"
+        collection_name = "drive_docs_vn"
         client = QdrantClient(path=db_path)
 
         # We process files one by one and check existence
@@ -182,7 +182,7 @@ class QdrantIndexNode(Node):
             os.makedirs(db_path)
 
         client = QdrantClient(path=db_path)
-        collection_name = "drive_docs"
+        collection_name = "drive_docs_vn"
 
         # Get cached models
         dense_model, sparse_model, colbert_model = get_embedding_models()
@@ -193,7 +193,7 @@ class QdrantIndexNode(Node):
                 collection_name=collection_name,
                 vectors_config={
                     "dense": VectorParams(size=384, distance=Distance.COSINE),
-                    "colbert": VectorParams(size=128, distance=Distance.COSINE, multivector_config={"comparator": "max_sim"}),
+                    "colbert": VectorParams(size=96, distance=Distance.COSINE, multivector_config={"comparator": "max_sim"}),
                 },
                 sparse_vectors_config={
                     "sparse": SparseVectorParams(index=None) # Default index
@@ -258,7 +258,7 @@ class QdrantSearchNode(Node):
 
         db_path = "./qdrant_db"
         client = QdrantClient(path=db_path)
-        collection_name = "drive_docs"
+        collection_name = "drive_docs_vn"
 
         # Get cached models
         dense_model, sparse_model, colbert_model = get_embedding_models()
