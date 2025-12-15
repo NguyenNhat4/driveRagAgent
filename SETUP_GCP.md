@@ -1,6 +1,6 @@
-# Google Drive RAG Agent - Setup Guide
+# Google Drive RAG Agent & MCP Server - Setup Guide
 
-This guide explains how to set up the Google Cloud Platform (GCP) project and configure the environment for the Google Drive RAG Agent.
+This guide explains how to set up the Google Cloud Platform (GCP) project and configure the environment for the Google Drive RAG Agent and the Model Context Protocol (MCP) Server.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ This guide explains how to set up the Google Cloud Platform (GCP) project and co
 
 1. In the sidebar, go to **APIs & Services > Library**.
 2. Search for and enable the following APIs:
-   - **Google Drive API** (for backend access)
+   - **Google Drive API** (for backend/MCP access)
    - **Google Picker API** (for the frontend folder selector)
 
 ## Step 3: Configure OAuth Consent Screen
@@ -39,13 +39,13 @@ This guide explains how to set up the Google Cloud Platform (GCP) project and co
 
 ## Step 4: Create Credentials
 
-You need two types of credentials: an **OAuth 2.0 Client ID** and an **API Key**.
+You need two types of credentials: an **OAuth 2.0 Client ID** (for Backend/MCP) and an **API Key** (for Frontend Picker).
 
-### A. OAuth 2.0 Client ID (for Authentication)
+### A. OAuth 2.0 Client ID (for Backend & MCP)
 
 1. Go to **APIs & Services > Credentials**.
 2. Click **Create Credentials > OAuth client ID**.
-3. Select **Desktop app** (since we are running this locally/via Streamlit backend logic for the initial auth flow).
+3. Select **Desktop app** (this supports the Python backend and MCP server).
    - Name it `Desktop Client`.
    - Click **Create**.
    - **Download** the JSON file.
@@ -91,19 +91,13 @@ GEMINI_API_KEY=your_gemini_api_key_here
 # Use the "Web application" Client ID for the Picker
 GOOGLE_CLIENT_ID=your_web_client_id_here
 
-# Use the "Desktop app" Client ID logic is handled by credentials.json,
-# but the Picker needs the Web Client ID.
+# The "Desktop app" Client ID logic is handled by credentials.json (required for backend/MCP).
 
 GOOGLE_APP_ID=your_project_number_here
 GOOGLE_API_KEY=your_api_key_here
 ```
 
-**Important Note on Client IDs:**
-- This application uses a hybrid approach.
-- The **backend** (Python) uses `credentials.json` (Desktop Client) to authenticate and read files from Drive.
-- The **frontend** (Google Picker) uses `GOOGLE_CLIENT_ID` (Web Client) and `GOOGLE_API_KEY` to let you select folders.
-
-## Step 7: Run the Application
+## Step 7: Run the Application (RAG Agent)
 
 1. Install dependencies:
    ```bash
@@ -114,9 +108,23 @@ GOOGLE_API_KEY=your_api_key_here
    streamlit run app.py
    ```
 3. Open your browser to the URL shown (usually `http://localhost:8501`).
+4. **First Run Authentication**: The backend will attempt to authenticate using `credentials.json`. A browser window should open asking you to log in to Google. Once completed, a `token.json` file will be created.
+
+## Step 8: Run the MCP Server
+
+The project includes a Model Context Protocol (MCP) server (`drive_mcp.py`) that exposes Google Drive tools to other agents.
+
+1. Ensure `credentials.json` is present.
+2. Ideally, run the Streamlit app first (Step 7) to generate `token.json` via the browser flow. If `token.json` exists, the MCP server can run without user interaction.
+3. Start the MCP server:
+   ```bash
+   fastmcp run drive_mcp.py
+   ```
+   Or use it with an MCP client (like Claude Desktop or another LLM agent).
 
 ## Troubleshooting
 
-- **403 Forbidden**: Ensure you enabled the APIs and added yourself as a Test User.
+- **403 Forbidden**: Ensure you enabled the APIs and added yourself as a Test User in OAuth Consent Screen.
 - **Origin Mismatch / Invalid Request in Picker**: Check the `GOOGLE_CLIENT_ID` in `.env` matches the Web Client ID in Console, and that `http://localhost:8501` is added to Authorized JavaScript Origins.
 - **Token Issues**: If you change scopes or encounter auth errors, delete the `token.json` file to force re-authentication.
+- **MCP Auth**: If the MCP server hangs or fails to authenticate, try running `python drive_mcp.py` directly to see if it triggers the auth flow, or generate `token.json` using the Streamlit app first.
