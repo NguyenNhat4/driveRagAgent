@@ -3,7 +3,7 @@ import os
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from flow import create_ingestion_flow, create_retrieval_flow
-from utils.drive_tools import get_drive_service, get_access_token
+from utils.drive_tools import get_service_account_email
 from utils.embedding_models import get_embedding_models
 
 # Load environment variables
@@ -19,11 +19,6 @@ with st.spinner("Initializing AI Models..."):
 if "GEMINI_API_KEY" not in os.environ:
     os.environ["GEMINI_API_KEY"] = st.text_input("Enter Gemini API Key", type="password")
 
-# Read Google App Credentials from Env
-CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-APP_ID = os.getenv("GOOGLE_APP_ID", "") # Project Number
-API_KEY = os.getenv("GOOGLE_API_KEY", "")
-
 st.title("🤖 Chat with your Google Drive (Hybrid Search)")
 
 # Tabs
@@ -32,36 +27,20 @@ tab1, tab2 = st.tabs(["📂 Ingest Data", "💬 Chat"])
 with tab1:
     st.header("Ingest Folder")
 
-    st.markdown("""
-    **Step 1: Pick a Folder**
-    Click the button below to open Google Picker. Select a folder, and copy its ID.
-    *Note: Ensure you have authorized the app.*
-    """)
-
-    with open("templates/google_picker.html", "r") as f:
-        html_template = f.read()
-
-    # Try to get backend token to bypass frontend auth
-    access_token = get_access_token()
-
-    # Inject Creds
-    html_content = html_template.replace("{client_id}", CLIENT_ID)\
-                                .replace("{app_id}", APP_ID)\
-                                .replace("{api_key}", API_KEY)\
-                                .replace("{access_token}", access_token if access_token else "")
-
-    components.html(html_content, height=600, scrolling=True)
+    # Display Service Account Email
+    sa_email = get_service_account_email()
+    st.info(f"**Action Required:** Please share your Google Drive folder with this Service Account email:\n\n`{sa_email}`")
 
     st.markdown("---")
 
     st.markdown("**Step 2: Run Ingestion**")
-    folder_id_input = st.text_input("Paste Folder ID here:")
+    folder_id_input = st.text_input("Paste Folder ID here:", help="The ID string from the URL of your Google Drive folder.")
 
     if st.button("Start Ingestion"):
         if not folder_id_input:
             st.error("Please enter a Folder ID.")
-        elif not os.path.exists("credentials.json"):
-            st.error("credentials.json not found. Please setup your Google Cloud Project and download the credentials file.")
+        elif "Unknown" in sa_email and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and not os.path.exists("service_account.json"):
+             st.error("Service Account Credentials not found. Please add 'service_account.json' to the root or set GOOGLE_APPLICATION_CREDENTIALS.")
         else:
             with st.spinner("Loading files, chunking, and indexing... This may take a while."):
                 shared = {

@@ -1,101 +1,59 @@
 import os
 import io
-import pickle
 import logging
 from typing import Optional, List, Dict, Any
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 from googleapiclient.errors import HttpError
-from google.auth.transport.requests import Request
 import pdfplumber
 import docx2txt
 import streamlit as st
-import streamlit.components.v1 as components
-
 
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/drive.metadata.readonly']
-TOKEN_FILE = "token.json"
-CREDENTIALS_FILE = "credentials.json"
-DEFAULT_PORT = 8080
+# We prioritize env var, but fallback to a default file name
+DEFAULT_SERVICE_ACCOUNT_FILE = "service_account.json"
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_credentials(allow_interactive=True) -> Optional[Credentials]:
+def get_credentials() -> Optional[service_account.Credentials]:
     """
-    Get valid user credentials from storage or initiate OAuth flow.
-    
-    Args:
-        allow_interactive: If True, initiates OAuth flow if credentials are missing/invalid.
-
-    Returns:
-        Valid Credentials object, or None if authentication fails.
+    Get valid Service Account credentials from storage or environment.
     """
     creds = None
     
-    # Try to load existing credentials
-    if os.path.exists(TOKEN_FILE):
+    # Check for GOOGLE_APPLICATION_CREDENTIALS env var first
+    gac = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    
+    if gac and os.path.exists(gac):
         try:
-            creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-        except ValueError as e:
-            logger.warning(f"Token file is invalid: {e}")
-            logger.info("Deleting token.json and creating new one...")
-            os.remove(TOKEN_FILE)
-    
-    # Refresh or create new credentials if needed
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            logger.info("Refreshing access token...")
-            try:
-                creds.refresh(Request())
-            except Exception as e:
-                logger.error(f"Error refreshing token: {e}")
-                logger.info("Deleting invalid token and re-authenticating...")
-                if os.path.exists(TOKEN_FILE):
-                    os.remove(TOKEN_FILE)
-                creds = None
+            creds = service_account.Credentials.from_service_account_file(gac, scopes=SCOPES)
+            return creds
+        except Exception as e:
+            logger.error(f"Error loading credentials from {gac}: {e}")
 
-        if not creds:
-            if not allow_interactive:
-                logger.info("Interactive auth disabled, returning None.")
-                return None
-
-            logger.info("Starting OAuth flow...")
-            if not os.path.exists(CREDENTIALS_FILE):
-                raise FileNotFoundError(
-                    f"{CREDENTIALS_FILE} not found. Please download it from Google Cloud Console."
-                )
+    # Fallback to default file in root
+    if os.path.exists(DEFAULT_SERVICE_ACCOUNT_FILE):
+        try:
+            creds = service_account.Credentials.from_service_account_file(DEFAULT_SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+            return creds
+        except Exception as e:
+            logger.error(f"Error loading credentials from {DEFAULT_SERVICE_ACCOUNT_FILE}: {e}")
             
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_FILE, 
-                SCOPES
-            )
-            creds = flow.run_local_server(
-                port=DEFAULT_PORT,
-                access_type='offline',
-                prompt='consent'
-            )
-        
-        # Save credentials for next run
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
-        logger.info(f"Credentials saved to {TOKEN_FILE}")
-    
-    return creds
-
-def get_access_token() -> Optional[str]:
-    """
-    Get the current valid access token.
-    Refreshes if necessary, but does not start interactive flow.
-    """
-    creds = get_credentials(allow_interactive=False)
-    if creds and creds.valid:
-        return creds.token
+    logger.error("No valid service account credentials found.")
     return None
+
+def get_service_account_email() -> str:
+    """
+    Helper to get the service account email for display.
+    """
+    creds = get_credentials()
+    if creds and hasattr(creds, 'service_account_email'):
+        return creds.service_account_email
+    return "Unknown (Check credentials)"
 
 # Global variable to cache the service instance
 _DRIVE_SERVICE = None
@@ -177,12 +135,6 @@ def read_file(file_id, mime_type):
         return f"Error reading file: {str(e)}"
 
 if __name__ == "__main__":
-    # Mock test if no creds
-    if not os.path.exists("credentials.json"):
-        print("No credentials.json found. Skipping integration test.")
-    else:
-        try:
-            files = search_files("test")
-            print(f"Found: {files}")
-        except Exception as e:
-             print(f"Test failed: {e}")
+    # Mock test
+    email = get_service_account_email()
+    print(f"Service Account Email: {email}")
